@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PartsPilot Copilot</title>
+  <style>
+    :root { font-family: Inter, system-ui, sans-serif; color: #172033; background: #f3f6fb; }
+    body { margin: 0; } header { background: #162b4d; color: white; padding: 18px 7%; }
+    main { display: grid; grid-template-columns: 1.2fr .8fr; gap: 18px; max-width: 1200px; margin: 24px auto; padding: 0 18px; }
+    section { background: white; border-radius: 12px; box-shadow: 0 3px 14px #14213d18; padding: 20px; }
+    #conversation { min-height: 440px; max-height: 60vh; overflow: auto; }
+    .msg { white-space: pre-wrap; padding: 12px 14px; border-radius: 10px; margin: 10px 0; }
+    .user { background: #e3efff; margin-left: 12%; } .assistant { background: #eef1f5; margin-right: 12%; }
+    textarea { width: 100%; box-sizing: border-box; resize: vertical; min-height: 72px; padding: 12px; border: 1px solid #c8d0dc; border-radius: 8px; }
+    button { margin-top: 10px; background: #1d6fe8; color: white; border: 0; padding: 11px 18px; border-radius: 8px; cursor: pointer; }
+    pre { white-space: pre-wrap; overflow: auto; max-height: 58vh; font-size: 12px; }
+    .examples button { background: #e8eef8; color: #234; margin: 4px 4px 0 0; }
+    @media(max-width: 800px) { main { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <header><strong>PartsPilot Copilot</strong><div>Grounded after-sales investigation across orders, shipments, claims and knowledge</div></header>
+  <main>
+    <section>
+      <div id="conversation"><div class="msg assistant">Ask me about a claim or purchase order. I will show the evidence used and flag contradictions.</div></div>
+      <textarea id="input" placeholder="Try: Investigate claim CLM-4021"></textarea>
+      <button onclick="send()">Send</button>
+      <div class="examples">
+        <button onclick="example('Investigate claim CLM-4021')">Investigate a claim</button>
+        <button onclick="example('What is the status of PO-2026-1042?')">Check an order</button>
+      </div>
+    </section>
+    <section><h3>Evidence</h3><pre id="evidence">No query yet.</pre></section>
+  </main>
+  <script>
+    const input = document.getElementById('input');
+    const conversation = document.getElementById('conversation');
+    function example(value) { input.value = value; input.focus(); }
+    async function send() {
+      const message = input.value.trim(); if (!message) return;
+      conversation.insertAdjacentHTML('beforeend', `<div class="msg user">${escapeHtml(message)}</div>`);
+      input.value = ''; conversation.scrollTop = conversation.scrollHeight;
+      const response = await fetch('/api/chat', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({message})});
+      const data = await response.json();
+      conversation.insertAdjacentHTML('beforeend', `<div class="msg assistant">${escapeHtml(data.answer)}</div>`);
+      document.getElementById('evidence').textContent = JSON.stringify(data.evidence, null, 2);
+      conversation.scrollTop = conversation.scrollHeight;
+    }
+    function escapeHtml(value) { return value.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c])); }
+  </script>
+</body>
+</html>
