@@ -31,6 +31,14 @@ The PostgreSQL data is stored in the named `postgres_data` Docker volume. For th
 
 The application still returns deterministic evidence when LLMAAS is not configured. When the key and endpoint are configured, the evidence is passed to the LLM and the response is generated with instructions not to invent transactional facts.
 
+## Photo-to-part identification
+
+On the main page, "Upload a photo of the part" sends the image to `POST /api/vision/identify`. The prototype matches the filename against known part-category keywords, and falls back to a deterministic hash-based heuristic when no keyword is found — this is a stand-in for a trained visual classifier, not one. The matched catalog candidates are cross-referenced against live inventory; if the top match is out of stock locally, a dealer-to-dealer transfer suggestion is computed from real surplus/deficit inventory levels.
+
+## Control tower dashboard
+
+`GET /dashboard` (backed by `GET /api/dashboard`) shows claim/PO/shipment status breakdowns, regional stock health, and ROI-style metrics (self-service resolution rate, open claim exposure, backordered POs, and potential transfer value from suggested surplus-to-deficit transfers). All figures are computed live from the imported dataset — nothing is fabricated.
+
 ## Security
 
 The LLMAAS key is used only by the backend container. It must not be placed in the frontend, Dockerfile, workbook, or source code. For a longer-lived deployment, inject it with AWS Systems Manager Parameter Store or Secrets Manager.

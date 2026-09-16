@@ -2,13 +2,16 @@ import json
 import re
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
+from .dashboard import metrics as dashboard_metrics
+from .dashboard import stock_positions, transfer_suggestions
 from .db import fetch_one
 from .llmaas import complete, configured
 from .tools import get_purchase_order, investigate_claim, search_knowledge
+from .vision import identify_part
 
 app = FastAPI(title="PartsPilot Copilot", version="0.1.0")
 STATIC = Path(__file__).parent / "static"
@@ -55,6 +58,32 @@ def deterministic_answer(message: str) -> tuple[str, dict]:
 @app.get("/")
 def index():
     return FileResponse(STATIC / "index.html")
+
+
+@app.get("/dashboard")
+def dashboard_page():
+    return FileResponse(STATIC / "dashboard.html")
+
+
+@app.get("/api/dashboard")
+def dashboard_data():
+    return dashboard_metrics()
+
+
+@app.post("/api/vision/identify")
+async def vision_identify(file: UploadFile = File(...)):
+    data = await file.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="The uploaded file was empty.")
+    result = identify_part(file.filename or "upload", data)
+    if result["candidates"]:
+        top_part_no = result["candidates"][0]["part_no"]
+        result["stock_positions"] = stock_positions(top_part_no)
+        result["transfer_suggestions"] = transfer_suggestions(top_part_no, limit=3)
+    else:
+        result["stock_positions"] = []
+        result["transfer_suggestions"] = []
+    return result
 
 
 @app.get("/api/health")

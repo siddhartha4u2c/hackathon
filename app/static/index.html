@@ -16,19 +16,32 @@
     button { margin-top: 10px; background: #1d6fe8; color: white; border: 0; padding: 11px 18px; border-radius: 8px; cursor: pointer; }
     pre { white-space: pre-wrap; overflow: auto; max-height: 58vh; font-size: 12px; }
     .examples button { background: #e8eef8; color: #234; margin: 4px 4px 0 0; }
+    .navlink { color: #cfe0ff; text-decoration: none; font-size: 14px; }
+    .navlink:hover { text-decoration: underline; }
+    header .navrow { display: flex; justify-content: space-between; align-items: baseline; }
+    .photo-row { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
+    .photo-row button { margin-top: 0; background: #eef1f5; color: #234; }
     @media(max-width: 800px) { main { grid-template-columns: 1fr; } }
   </style>
 </head>
 <body>
-  <header><strong>PartsPilot Copilot</strong><div>Grounded after-sales investigation across orders, shipments, claims and knowledge</div></header>
+  <header>
+    <div class="navrow"><strong>PartsPilot Copilot</strong><a class="navlink" href="/dashboard">Control Tower Dashboard &rarr;</a></div>
+    <div>Grounded after-sales investigation across orders, shipments, claims and knowledge</div>
+  </header>
   <main>
     <section>
-      <div id="conversation"><div class="msg assistant">Ask me about a claim or purchase order. I will show the evidence used and flag contradictions.</div></div>
+      <div id="conversation"><div class="msg assistant">Ask me about a claim or purchase order, or upload a photo of a part and I will try to identify it and check stock. I will show the evidence used and flag contradictions.</div></div>
       <textarea id="input" placeholder="Try: Investigate claim CLM-4021"></textarea>
       <button onclick="send()">Send</button>
       <div class="examples">
         <button onclick="example('Investigate claim CLM-4021')">Investigate a claim</button>
         <button onclick="example('What is the status of PO-2026-1042?')">Check an order</button>
+      </div>
+      <div class="photo-row">
+        <input type="file" id="photo" accept="image/*" style="display:none">
+        <button onclick="document.getElementById('photo').click()">Upload a photo of the part</button>
+        <span id="photo-name" style="font-size:13px;color:#556;"></span>
       </div>
     </section>
     <section><h3>Evidence</h3><pre id="evidence">No query yet.</pre></section>
@@ -48,6 +61,39 @@
       conversation.scrollTop = conversation.scrollHeight;
     }
     function escapeHtml(value) { return value.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c])); }
+
+    document.getElementById('photo').addEventListener('change', identifyPhoto);
+    async function identifyPhoto(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+      document.getElementById('photo-name').textContent = file.name;
+      conversation.insertAdjacentHTML('beforeend', `<div class="msg user">[Uploaded photo: ${escapeHtml(file.name)}]</div>`);
+      conversation.scrollTop = conversation.scrollHeight;
+      const formData = new FormData();
+      formData.append('file', file);
+      const response = await fetch('/api/vision/identify', { method: 'POST', body: formData });
+      const data = await response.json();
+      let answer;
+      if (!data.candidates || !data.candidates.length) {
+        answer = `I could not match this photo to an active part in the catalog (closest category guess: ${data.matched_category}).`;
+      } else {
+        const top = data.candidates[0];
+        answer = `This looks like a ${top.category} part. Best catalog match: ${top.part_no} (${top.description}), confidence ${Math.round(top.confidence * 100)}%. `;
+        const inStock = (data.stock_positions || []).find(p => p.available_qty > 0);
+        if (inStock) {
+          answer += `In stock at ${inStock.warehouse_loc} (${inStock.available_qty} available).`;
+        } else if (data.transfer_suggestions && data.transfer_suggestions.length) {
+          const t = data.transfer_suggestions[0];
+          answer += `Not in stock locally. ${t.transfer_qty} unit(s) can be transferred from ${t.from_warehouse} to ${t.to_warehouse} (est. value €${t.transfer_value_eur}).`;
+        } else {
+          answer += `No stock or transfer source was found across warehouses for this part.`;
+        }
+      }
+      conversation.insertAdjacentHTML('beforeend', `<div class="msg assistant">${escapeHtml(answer)}</div>`);
+      document.getElementById('evidence').textContent = JSON.stringify(data, null, 2);
+      conversation.scrollTop = conversation.scrollHeight;
+      event.target.value = '';
+    }
   </script>
 </body>
 </html>

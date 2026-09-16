@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PartsPilot Control Tower</title>
+  <style>
+    :root { font-family: Inter, system-ui, sans-serif; color: #172033; background: #f3f6fb; }
+    body { margin: 0; }
+    header { background: #162b4d; color: white; padding: 18px 7%; }
+    header .navrow { display: flex; justify-content: space-between; align-items: baseline; }
+    .navlink { color: #cfe0ff; text-decoration: none; font-size: 14px; }
+    .navlink:hover { text-decoration: underline; }
+    main { max-width: 1200px; margin: 24px auto; padding: 0 18px; }
+    .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; margin-bottom: 20px; }
+    .card { background: white; border-radius: 12px; box-shadow: 0 3px 14px #14213d18; padding: 16px; }
+    .card .label { font-size: 12px; color: #667; text-transform: uppercase; letter-spacing: .04em; }
+    .card .value { font-size: 26px; font-weight: 700; margin-top: 6px; color: #16305c; }
+    .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+    section { background: white; border-radius: 12px; box-shadow: 0 3px 14px #14213d18; padding: 20px; margin-bottom: 18px; }
+    h3 { margin-top: 0; }
+    .bar-row { display: grid; grid-template-columns: 110px 1fr 46px; align-items: center; gap: 8px; margin: 8px 0; font-size: 13px; }
+    .bar-track { background: #eef1f5; border-radius: 6px; height: 14px; overflow: hidden; }
+    .bar-fill { background: #1d6fe8; height: 100%; border-radius: 6px; }
+    .bar-fill.warn { background: #e0912b; }
+    .bar-fill.bad { background: #d64545; }
+    .bar-fill.good { background: #1f9e6c; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th, td { text-align: left; padding: 7px 8px; border-bottom: 1px solid #e6eaf0; }
+    th { color: #556; font-weight: 600; }
+    .region-row { display: flex; gap: 10px; align-items: center; margin: 8px 0; font-size: 13px; }
+    .region-name { width: 60px; font-weight: 600; }
+    .stack { flex: 1; display: flex; height: 14px; border-radius: 6px; overflow: hidden; background: #eef1f5; }
+    .seg-deficit { background: #d64545; }
+    .seg-healthy { background: #cfd6e2; }
+    .seg-surplus { background: #1f9e6c; }
+    .empty { color: #889; font-size: 13px; }
+    @media(max-width: 800px) { .grid2 { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="navrow"><strong>PartsPilot Control Tower</strong><a class="navlink" href="/">&larr; Back to Copilot</a></div>
+    <div>Live stock-to-demand deficit scoring, dealer-to-dealer transfer suggestions, and after-sales ROI</div>
+  </header>
+  <main>
+    <div class="cards" id="cards"></div>
+    <div class="grid2">
+      <section><h3>Claims by status</h3><div id="claims-chart"></div></section>
+      <section><h3>Purchase orders by status</h3><div id="po-chart"></div></section>
+      <section><h3>Shipments by status</h3><div id="shipment-chart"></div></section>
+      <section><h3>Regional stock health</h3><div id="region-chart"></div></section>
+    </div>
+    <section>
+      <h3>Suggested dealer-to-dealer transfers (surplus &rarr; deficit)</h3>
+      <div id="transfers"></div>
+    </section>
+  </main>
+  <script>
+    function fmtEur(n) { return '€' + Number(n).toLocaleString(undefined, { maximumFractionDigits: 0 }); }
+
+    function renderCards(roi) {
+      const cards = [
+        { label: 'Self-service resolution rate', value: roi.self_service_rate_pct + '%' },
+        { label: 'Claims resolved / total', value: roi.resolved_claims + ' / ' + roi.total_claims },
+        { label: 'Open claim exposure', value: fmtEur(roi.open_claim_exposure_eur) },
+        { label: 'Backordered POs', value: roi.backordered_pos },
+        { label: 'Inventory lines in deficit', value: roi.deficit_lines },
+        { label: 'Potential transfer value (holding cost avoided)', value: fmtEur(roi.potential_transfer_value_eur) },
+      ];
+      document.getElementById('cards').innerHTML = cards.map(c =>
+        `<div class="card"><div class="label">${c.label}</div><div class="value">${c.value}</div></div>`
+      ).join('');
+    }
+
+    function statusClass(status) {
+      const bad = ['Rejected', 'Cancelled', 'Lost', 'Delayed', 'Backordered'];
+      const good = ['Paid', 'Approved', 'Delivered'];
+      if (bad.includes(status)) return 'bad';
+      if (good.includes(status)) return 'good';
+      return '';
+    }
+
+    function renderBarChart(elementId, rows, labelKey) {
+      const max = Math.max(...rows.map(r => r.n), 1);
+      document.getElementById(elementId).innerHTML = rows.map(r => {
+        const pct = Math.round((r.n / max) * 100);
+        return `<div class="bar-row">
+          <div>${r[labelKey]}</div>
+          <div class="bar-track"><div class="bar-fill ${statusClass(r[labelKey])}" style="width:${pct}%"></div></div>
+          <div>${r.n}</div>
+        </div>`;
+      }).join('') || '<div class="empty">No data.</div>';
+    }
+
+    function renderRegionChart(regionHealth) {
+      const regions = Object.keys(regionHealth);
+      document.getElementById('region-chart').innerHTML = regions.map(region => {
+        const b = regionHealth[region];
+        const total = b.deficit_lines + b.surplus_lines + b.healthy_lines || 1;
+        const pct = n => Math.round((n / total) * 100);
+        return `<div class="region-row">
+          <div class="region-name">${region}</div>
+          <div class="stack">
+            <div class="seg-deficit" style="width:${pct(b.deficit_lines)}%"></div>
+            <div class="seg-healthy" style="width:${pct(b.healthy_lines)}%"></div>
+            <div class="seg-surplus" style="width:${pct(b.surplus_lines)}%"></div>
+          </div>
+          <div style="font-size:12px;color:#667;">${b.deficit_lines} deficit / ${b.surplus_lines} surplus</div>
+        </div>`;
+      }).join('') || '<div class="empty">No data.</div>';
+    }
+
+    function renderTransfers(rows) {
+      if (!rows.length) {
+        document.getElementById('transfers').innerHTML = '<div class="empty">No deficit/surplus pairs found right now.</div>';
+        return;
+      }
+      const body = rows.map(r => `<tr>
+        <td>${r.part_no}</td><td>${r.description}</td>
+        <td>${r.from_warehouse}</td><td>${r.to_warehouse}</td>
+        <td>${r.transfer_qty}</td><td>${fmtEur(r.transfer_value_eur)}</td>
+      </tr>`).join('');
+      document.getElementById('transfers').innerHTML =
+        `<table><thead><tr><th>Part</th><th>Description</th><th>From</th><th>To</th><th>Qty</th><th>Value</th></tr></thead><tbody>${body}</tbody></table>`;
+    }
+
+    async function load() {
+      const response = await fetch('/api/dashboard');
+      const data = await response.json();
+      renderCards(data.roi);
+      renderBarChart('claims-chart', data.claims_by_status, 'claim_status');
+      renderBarChart('po-chart', data.po_by_status, 'po_status');
+      renderBarChart('shipment-chart', data.shipment_by_status, 'shipment_status');
+      renderRegionChart(data.region_health);
+      renderTransfers(data.transfer_suggestions);
+    }
+    load();
+  </script>
+</body>
+</html>
